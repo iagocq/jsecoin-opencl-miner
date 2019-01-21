@@ -23,3 +23,6 @@ Run:
 ```sh
 make
 ```
+
+## Running
+`cd` into the `build/bin` directory and run the `hasher` binary
