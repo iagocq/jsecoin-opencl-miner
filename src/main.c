@@ -239,7 +239,13 @@ int main(int argc, char *argv[]) {
                          0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
     sha256round((uint8_t *) prehash, state);
 
-    const size_t globalWorkSize[] = {nworkers, nworkers, 10};
+    size_t globalWorkSize[3];
+
+    for (int i = 0; i < 3; i++) {
+        printf("Insert the value for dimension %d of the work size: ", i + 1);
+        scanf("%u", &globalWorkSize[i]);
+    }
+
     uint32_t nitems = globalWorkSize[0] * globalWorkSize[1] * globalWorkSize[2];
 
     cl_mem prehashBuffer =
@@ -291,12 +297,14 @@ int main(int argc, char *argv[]) {
 
     printf("Took %.3fs\n", elapsedTime);
     printf("%d Hashes\n", nitems);
-    printf("%.3f H/s\n", (float) nitems / (float) elapsedTime);
+    printf("%.3f H/s\n", (double) nitems / elapsedTime);
+/*
     for (int i = 0; i < nitems; i++) {
         if (result[i] == 1) {
             printf("%d\n", i);
         }
     }
+*/
     clReleaseCommandQueue(queue);
 
     clReleaseMemObject(prehashBuffer);
