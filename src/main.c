@@ -29,7 +29,6 @@ SOFTWARE.
 #include <stdio.h>
 #include <stdlib.h>
 
-
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -167,7 +166,8 @@ int main(int argc, char *argv[]) {
         printf("Found %d platform%s\n", platformIdCount, plural(platformIdCount));
     }
 
-    cl_platform_id *platformIds = (cl_platform_id *) alloca(platformIdCount * sizeof(cl_platform_id));
+    cl_platform_id *platformIds =
+        (cl_platform_id *) alloca(platformIdCount * sizeof(cl_platform_id));
     clGetPlatformIDs(platformIdCount, platformIds, NULL);
 
     for (cl_uint i = 0; i < platformIdCount; i++) {
@@ -204,6 +204,7 @@ int main(int argc, char *argv[]) {
                     maxItemSizes, NULL);
     nworkers = maxItemSizes[0];
     printf("Max dimensions: [%u, %u, %u]\n", maxItemSizes[0], maxItemSizes[1], maxItemSizes[2]);
+
     cl_context_properties contextProperties[] = {
         CL_CONTEXT_PLATFORM, (cl_context_properties) platformIds[platformId], 0, 0};
 
