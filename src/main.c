@@ -27,6 +27,8 @@ SOFTWARE.
 #include <CL/cl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
+
 #ifdef _WIN32
     #include <windows.h>
 #else
@@ -45,7 +47,7 @@ SOFTWARE.
 #define SIG0(x) (ROTRIGHT(x,7) ^ ROTRIGHT(x,18) ^ ((x) >> 3))
 #define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
 
-const unsigned int k[64] = {
+const uint32_t k[64] = {
     0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
     0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
     0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
@@ -56,8 +58,8 @@ const unsigned int k[64] = {
     0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
 };
 
-void sha256round(unsigned char *data, unsigned int *state) {
-    unsigned int a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
+void sha256round(uint8_t *data, uint32_t *state) {
+    uint32_t a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
     for (i = 0, j = 0; i < 16; ++i, j += 4)
         m[i] = (data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3]);
@@ -227,14 +229,15 @@ int main(int argc, char *argv[]) {
     checkError(error);
 
     char prehash[65] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    unsigned int state[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    uint32_t state[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
     sha256round(prehash, state);
 
     const size_t globalWorkSize[] = { nworkers, nworkers, 10 };
-    unsigned int nitems = globalWorkSize[0] * globalWorkSize[1] * globalWorkSize[2];
+    uint32_t nitems = globalWorkSize[0] * globalWorkSize[1] * globalWorkSize[2];
+
     cl_mem prehashBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 64, state, &error);
     checkError(error);
-    cl_mem resultBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, nitems * 4, NULL, &error);
+    cl_mem resultBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, nitems * sizeof(uint32_t), NULL, &error);
     checkError(error);
 
     cl_command_queue queue = clCreateCommandQueue(context, deviceIds[deviceId], 0, &error);
@@ -262,7 +265,7 @@ int main(int argc, char *argv[]) {
     error = clFinish(queue);
     checkError(error);
 
-    unsigned int *result = malloc(nitems * 4);
+    uint32_t *result = malloc(nitems * sizeof(uint32_t));
     error = clEnqueueReadBuffer(queue, resultBuffer, CL_TRUE, 0, nitems * 4, result, 0, NULL, NULL);
     checkError(error);
 

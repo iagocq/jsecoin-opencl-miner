@@ -127,12 +127,12 @@ __kernel void sha256(__global uint *hashedPrehash, __global uint *result, uint s
     padded[0] = ',';
     char n = ito10(nonce, padded + 1);
     padded[n + 1] = 0x80;
-    for (int i = n + 2; i < 63; i++) {
+    for (int i = n + 2; i < 62; i++) {
         padded[i] = 0;
     }
 
     uint bitlen = (65 + n) * 8;
-      padded[63] = bitlen;
+    padded[63] = bitlen;
     padded[62] = bitlen >> 8;
 
     sha256round(padded, state);
