@@ -1,5 +1,5 @@
-# JSECoin OpenCL Hasher
-A JSECoin OpenCL-based SHA-256 hasher for better hashrates.
+# JSECoin OpenCL Miner
+A JSECoin OpenCL-based SHA-256 miner for better hashrates.
 
 ## About
 This project is incomplete to be actually useful for the time being. And it needs a cleanup.
@@ -25,4 +25,4 @@ make
 ```
 
 ## Running
-`cd` into the `build/bin` directory and run the `hasher` binary
+`cd` into the `build/bin` directory and run the `miner` binary
