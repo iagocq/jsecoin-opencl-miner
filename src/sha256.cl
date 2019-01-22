@@ -68,7 +68,7 @@ char ito10(uint num, uchar* buf) {
     return n;
 }
 
-void sha256round(uchar *data, uint *state) {
+void sha256round(uchar *data, __global uint *state_in, uint *state_out) {
     uint a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
     for (i = 0, j = 0; i < 16; ++i, j += 4)
@@ -76,14 +76,14 @@ void sha256round(uchar *data, uint *state) {
     for ( ; i < 64; ++i)
         m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
 
-    a = state[0];
-    b = state[1];
-    c = state[2];
-    d = state[3];
-    e = state[4];
-    f = state[5];
-    g = state[6];
-    h = state[7];
+    a = state_in[0];
+    b = state_in[1];
+    c = state_in[2];
+    d = state_in[3];
+    e = state_in[4];
+    f = state_in[5];
+    g = state_in[6];
+    h = state_in[7];
 
     for (i = 0; i < 64; ++i) {
         t1 = h + EP1(e) + CH(e,f,g) + k[i] + m[i];
@@ -98,14 +98,14 @@ void sha256round(uchar *data, uint *state) {
         a = t1 + t2;
     }
 
-    state[0] += a;
-    state[1] += b;
-    state[2] += c;
-    state[3] += d;
-    state[4] += e;
-    state[5] += f;
-    state[6] += g;
-    state[7] += h;
+    state_out[0] = a;
+    state_out[1] = b;
+    state_out[2] = c;
+    state_out[3] = d;
+    state_out[4] = e;
+    state_out[5] = f;
+    state_out[6] = g;
+    state_out[7] = h;
 }
 
 __kernel void sha256(__global uint *hashedPrehash, __global uint *result, uint startNonce, uint difficultyMask) {
@@ -115,14 +115,6 @@ __kernel void sha256(__global uint *hashedPrehash, __global uint *result, uint s
     uint state[8];
 
     result[id] = 0;
-    state[0] = hashedPrehash[0];
-    state[1] = hashedPrehash[1];
-    state[2] = hashedPrehash[2];
-    state[3] = hashedPrehash[3];
-    state[4] = hashedPrehash[4];
-    state[5] = hashedPrehash[5];
-    state[6] = hashedPrehash[6];
-    state[7] = hashedPrehash[7];
 
     padded[0] = ',';
     char n = ito10(nonce, padded + 1);
@@ -135,7 +127,7 @@ __kernel void sha256(__global uint *hashedPrehash, __global uint *result, uint s
     padded[63] = bitlen;
     padded[62] = bitlen >> 8;
 
-    sha256round(padded, state);
+    sha256round(padded, hashedPrehash, state);
     if ((state[0] & difficultyMask) == 0)
         result[id] = 1;
 }
