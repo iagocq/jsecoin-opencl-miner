@@ -54,3 +54,4 @@ dkms.conf
 build
 CL
 .vscode
+sha256.cl.c

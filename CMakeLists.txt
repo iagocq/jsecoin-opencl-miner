@@ -3,7 +3,13 @@ project ("JSECoin OpenCL Miner")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-add_executable(miner src/main.c)
-target_link_libraries(miner OpenCL)
+file(READ src/sha256.cl SHA256_CL_SOURCE)
+
+configure_file(src/sha256.cl.c.in ${CMAKE_SOURCE_DIR}/src/sha256.cl.c)
+
+add_executable(miner src/main.c
+                     src/sha256.c
+                     src/sha256.cl.c)
+
 include_directories(include)
-configure_file(src/sha256.cl ${CMAKE_BINARY_DIR}/bin/sha256.cl)
+target_link_libraries(miner OpenCL)
