@@ -26,8 +26,8 @@ SOFTWARE.
 
 #include <CL/cl.h>
 #include <inttypes.h>
-#include <sha256.cl.h>
-#include <sha256.h>
+#include <jseminer/sha256.cl.h>
+#include <jseminer/sha256.h>
 #include <stdio.h>
 #include <stdlib.h>
 

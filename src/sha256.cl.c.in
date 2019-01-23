@@ -22,7 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <sha256.cl.h>
+#include <jseminer/sha256.cl.h>
 
 char *sha256CLSource = R"(
     @SHA256_CL_SOURCE@
