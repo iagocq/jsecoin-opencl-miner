@@ -9,7 +9,8 @@ configure_file(src/sha256.cl.c.in ${CMAKE_SOURCE_DIR}/src/sha256.cl.c)
 
 add_executable(miner src/main.c
                      src/sha256.c
-                     src/sha256.cl.c)
+                     src/sha256.cl.c
+                     src/miner.c)
 
 include_directories(include)
 target_link_libraries(miner OpenCL)

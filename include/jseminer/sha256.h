@@ -22,8 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef _SHA256_H_
-#define _SHA256_H_
+#ifndef _JSEMINER_SHA256_H_
+#define _JSEMINER_SHA256_H_
 
 #include <inttypes.h>
 #include <stdio.h>

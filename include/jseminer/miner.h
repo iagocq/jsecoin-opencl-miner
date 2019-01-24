@@ -22,9 +22,37 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef _JSEMINER_SHA256_CL_H_
-#define _JSEMINER_SHA256_CL_H_
+#ifndef _JSEMINER_MINER_H_
+#define _JSEMINER_MINER_H_
 
-char *sha256CLSource;
+#define CL_TARGET_OPENCL_VERSION 120
+
+#include <CL/cl.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define checkError(error) _checkError(__LINE__, error)
+
+typedef struct _CL_MINER {
+    cl_uint platformCount, deviceCount;
+    cl_platform_id *platforms;
+    cl_device_id *devices;
+    cl_context context;
+    cl_program program;
+    cl_kernel kernel;
+    cl_command_queue commandQueue;
+    size_t maxWorkDimensions[3];
+} CL_MINER;
+
+void _checkError(int line, cl_int error);
+char *getPlatformName(cl_platform_id platformId);
+char *getDeviceName(cl_device_id deviceId);
+cl_program createProgram(char *source, size_t len, cl_context context, cl_int *error);
+int setupMiner(CL_MINER *miner, cl_platform_id platform, cl_device_id device, char *source, char *kernel);
+int getPlatforms(CL_MINER *miner);
+int getDevices(CL_MINER *miner, cl_platform_id platform, cl_device_type deviceType);
+int getMaxWorkDimensions(CL_MINER *miner, cl_device_id device);
+void releaseMiner(CL_MINER *miner);
+void initMiner(CL_MINER *miner);
 
 #endif
