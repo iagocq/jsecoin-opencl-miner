@@ -25,6 +25,7 @@ SOFTWARE.
 #define CL_TARGET_OPENCL_VERSION 120
 
 #include <CL/cl.h>
+#include <getopt.h>
 #include <inttypes.h>
 #include <jseminer/sha256.cl.h>
 #include <jseminer/sha256.h>
@@ -38,7 +39,27 @@ SOFTWARE.
 #endif
 
 #define checkError(error) _checkError(__LINE__, error)
+#define fCheckError(error) _fCheckError(__LINE__, error)
+#define _fCheckError(line, error)                                                                            \
+    do {                                                                                                     \
+        if (error != CL_SUCCESS) {                                                                           \
+            fprintf(stderr, "%d: OpenCL call failed with error code %d\n", line, error);                     \
+            return 0;                                                                                        \
+        }                                                                                                    \
+    } while (0)
+
 #define plural(number) (number > 1 ? "s" : "")
+
+typedef struct _CL_MINER {
+    cl_uint platformCount, deviceCount;
+    cl_platform_id *platforms;
+    cl_device_id *devices;
+    cl_context context;
+    cl_program program;
+    cl_kernel kernel;
+    cl_command_queue commandQueue;
+    size_t maxWorkDimensions[3];
+} CL_MINER;
 
 void _checkError(int line, cl_int error) {
     if (error != CL_SUCCESS) {
@@ -82,93 +103,158 @@ cl_program createProgram(char *source, size_t len, cl_context context, cl_int *e
     return program;
 }
 
-int main(int argc, char *argv[]) {
-    int nworkers = 0;
+int setupMiner(CL_MINER *miner, cl_platform_id platform, cl_device_id device, char *source, char *kernel) {
     cl_int error;
 
-    cl_uint platformIdCount = 0;
-    clGetPlatformIDs(0, NULL, &platformIdCount);
+    cl_context_properties contextProperties[] = {CL_CONTEXT_PLATFORM, (cl_context_properties) platform, 0, 0};
 
-    if (platformIdCount == 0) {
-        fprintf(stderr, "No OpenCL platforms found\n");
-        return EXIT_FAILURE;
-    } else {
-        printf("Found %d platform%s\n", platformIdCount, plural(platformIdCount));
-    }
+    miner->context =
+        clCreateContext(contextProperties, miner->deviceCount, miner->devices, NULL, NULL, &error);
+    fCheckError(error);
 
-    cl_platform_id *platformIds =
-        (cl_platform_id *) alloca(platformIdCount * sizeof(cl_platform_id));
-    clGetPlatformIDs(platformIdCount, platformIds, NULL);
+    miner->program = createProgram(source, 0, miner->context, &error);
+    fCheckError(error);
 
-    for (cl_uint i = 0; i < platformIdCount; i++) {
-        printf("%d:\t%s\n", i, getPlatformName(platformIds[i]));
-    }
-    int platformId;
-    printf("Select platform index to use: ");
-    scanf("%d", &platformId);
-
-    cl_uint deviceIdCount = 0;
-    clGetDeviceIDs(platformIds[platformId], CL_DEVICE_TYPE_ALL, 0, NULL, &deviceIdCount);
-
-    if (deviceIdCount == 0) {
-        fprintf(stderr, "No OpenCL devices found\n");
-        return EXIT_FAILURE;
-    } else {
-        printf("Found %d device%s on platform %d\n", deviceIdCount, plural(deviceIdCount), 0);
-    }
-
-    cl_device_id *deviceIds = (cl_device_id *) alloca(deviceIdCount * sizeof(cl_device_id));
-    clGetDeviceIDs(platformIds[platformId], CL_DEVICE_TYPE_ALL, deviceIdCount, deviceIds, NULL);
-
-    for (cl_uint i = 0; i < deviceIdCount; i++) {
-        printf("%d:\t%s\n", i, getDeviceName(deviceIds[i]));
-    }
-
-    int deviceId;
-    printf("Select device index to use: ");
-    scanf("%d", &deviceId);
-
-    size_t maxItemSizes[3];
-
-    clGetDeviceInfo(deviceIds[deviceId], CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(maxItemSizes),
-                    maxItemSizes, NULL);
-    nworkers = maxItemSizes[0];
-    printf("Max dimensions: [%u, %u, %u]\n", maxItemSizes[0], maxItemSizes[1], maxItemSizes[2]);
-
-    cl_context_properties contextProperties[] = {
-        CL_CONTEXT_PLATFORM, (cl_context_properties) platformIds[platformId], 0, 0};
-
-    cl_context context =
-        clCreateContext(contextProperties, deviceIdCount, deviceIds, NULL, NULL, &error);
-    checkError(error);
-
-    size_t sourceLen = 0;
-    char *source = sha256CLSource;
-
-    cl_program program = createProgram(source, sourceLen, context, &error);
-    checkError(error);
-
-    error = clBuildProgram(program, deviceIdCount, deviceIds, NULL, NULL, NULL);
+    error = clBuildProgram(miner->program, miner->deviceCount, miner->devices, NULL, NULL, NULL);
     if (error == CL_BUILD_PROGRAM_FAILURE) {
         size_t logSize;
-        clGetProgramBuildInfo(program, deviceIds[deviceId], CL_PROGRAM_BUILD_LOG, 0, NULL,
-                              &logSize);
+        clGetProgramBuildInfo(miner->program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &logSize);
         char *buildLog = (char *) malloc(logSize);
-        clGetProgramBuildInfo(program, deviceIds[deviceId], CL_PROGRAM_BUILD_LOG, logSize, buildLog,
-                              NULL);
+        clGetProgramBuildInfo(miner->program, device, CL_PROGRAM_BUILD_LOG, logSize, buildLog, NULL);
         fprintf(stderr, "Build error!\n%s\n", buildLog);
+        return 0;
+    }
+    fCheckError(error);
+
+    miner->kernel = clCreateKernel(miner->program, "sha256", &error);
+    fCheckError(error);
+    miner->commandQueue = clCreateCommandQueue(miner->context, device, 0, &error);
+    fCheckError(error);
+
+    return 1;
+}
+
+int getPlatforms(CL_MINER *miner) {
+    clGetPlatformIDs(0, NULL, &miner->platformCount);
+
+    if (miner->platformCount == 0)
+        return 0;
+
+    miner->platforms = (cl_platform_id *) malloc(miner->platformCount * sizeof(cl_platform_id));
+    clGetPlatformIDs(miner->platformCount, miner->platforms, NULL);
+    return 1;
+}
+
+int getDevices(CL_MINER *miner, cl_platform_id platform, cl_device_type deviceType) {
+    clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, NULL, &miner->deviceCount);
+
+    if (miner->deviceCount == 0)
+        return 0;
+
+    miner->devices = (cl_device_id *) malloc(miner->deviceCount * sizeof(cl_device_id));
+    clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, miner->deviceCount, miner->devices, NULL);
+    return 1;
+}
+
+int getMaxWorkDimensions(CL_MINER *miner, cl_device_id device) {
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(miner->maxWorkDimensions),
+                    miner->maxWorkDimensions, NULL);
+}
+
+void releaseMiner(CL_MINER *miner) {
+    if (miner->devices != NULL)
+        free(miner->devices);
+    if (miner->platforms != NULL)
+        free(miner->platforms);
+
+    clReleaseCommandQueue(miner->commandQueue);
+
+    clReleaseKernel(miner->kernel);
+    clReleaseProgram(miner->program);
+
+    clReleaseContext(miner->context);
+}
+
+void initMiner(CL_MINER *miner) { memset(miner, 0, sizeof(miner)); }
+
+int main(int argc, char *argv[]) {
+    int nworkers = 0;
+    cl_int error = 0;
+    size_t globalWorkSize[3];
+    unsigned int deviceIdx, platformIdx;
+
+    CL_MINER miner;
+    if (argc < 6) {
+        fprintf(stderr, "Usage: %s [platform ID] [device ID] [<Work Dim X> <Work Dim Y> <Work Dim Z>]\n",
+                argv[0]);
+    }
+
+    initMiner(&miner);
+
+    getPlatforms(&miner);
+    if (miner.platformCount == 0) {
+        fprintf(stderr, "No OpenCL platforms available\n");
         return EXIT_FAILURE;
     }
-    checkError(error);
+    if (argc < 2) {
+        printf("Platforms:\n");
+        for (cl_uint i = 0; i < miner.platformCount; i++) {
+            printf("ID %u:\t%s\n", i, getPlatformName(miner.platforms[i]));
+        }
+        return 0;
+    }
+    platformIdx = atoi(argv[1]);
+    if (platformIdx > miner.platformCount) {
+        fprintf(stderr, "Invalid platform ID\n");
+        return 1;
+    }
 
-    cl_kernel kernel = clCreateKernel(program, "sha256", &error);
-    checkError(error);
+    getDevices(&miner, miner.platforms[0], CL_DEVICE_TYPE_ALL);
+    if (miner.deviceCount == 0) {
+        fprintf(stderr, "No OpenCL devices available on this platform\n");
+        return EXIT_FAILURE;
+    }
+    if (argc < 3) {
+        printf("Devices:\n");
+        for (cl_uint i = 0; i < miner.deviceCount; i++) {
+            printf("ID %u:\t%s\n", i, getDeviceName(miner.devices[i]));
+        }
+        return 0;
+    }
+    deviceIdx = atoi(argv[1]);
+    if (deviceIdx > platformIdx) {
+        fprintf(stderr, "Invalid device ID\n");
+        return 1;
+    }
 
-    size_t globalWorkSize[3];
+    getMaxWorkDimensions(&miner, miner.devices[0]);
+    if (argc < 6) {
+        printf("Max Dimensions: [%u, %u, %u]\n", miner.maxWorkDimensions[0], miner.maxWorkDimensions[1],
+               miner.maxWorkDimensions[2]);
+        return 0;
+    }
+    globalWorkSize[0] = (size_t) atoi(argv[3]);
+    globalWorkSize[1] = (size_t) atoi(argv[4]);
+    globalWorkSize[2] = (size_t) atoi(argv[5]);
+    if (globalWorkSize[0] > miner.maxWorkDimensions[0]) {
+        fprintf(stderr, "Work Dim X is greater than the maximum for the X dimension, setting to %d\n",
+                miner.maxWorkDimensions[0]);
+        globalWorkSize[0] = miner.maxWorkDimensions[0];
+    }
+    if (globalWorkSize[1] > miner.maxWorkDimensions[1]) {
+        fprintf(stderr, "Work Dim Y is greater than the maximum for the Y dimension, setting to %d\n",
+                miner.maxWorkDimensions[1]);
+        globalWorkSize[1] = miner.maxWorkDimensions[1];
+    }
+    if (globalWorkSize[2] > miner.maxWorkDimensions[2]) {
+        fprintf(stderr, "Work Dim Z is greater than the maximum for the Z dimension, setting to %d\n",
+                miner.maxWorkDimensions[2]);
+        globalWorkSize[2] = miner.maxWorkDimensions[2];
+    }
 
-    for (int i = 0; i < 3; i++) {
-        printf("Insert the value for dimension %d of the work size: ", i + 1);
-        scanf("%u", &globalWorkSize[i]);
+    if (!setupMiner(&miner, miner.platforms[0], miner.devices[0], sha256CLSource, "sha256")) {
+        fprintf(stderr, "Failed to setup miner\n");
+        return EXIT_FAILURE;
     }
 
     char prehash[65] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -180,21 +266,18 @@ int main(int argc, char *argv[]) {
     uint32_t nitems = globalWorkSize[0] * globalWorkSize[1] * globalWorkSize[2];
 
     cl_mem prehashBuffer =
-        clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 64, state, &error);
+        clCreateBuffer(miner.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 64, state, &error);
     checkError(error);
     cl_mem resultBuffer =
-        clCreateBuffer(context, CL_MEM_WRITE_ONLY, nitems * sizeof(uint32_t), NULL, &error);
-    checkError(error);
-
-    cl_command_queue queue = clCreateCommandQueue(context, deviceIds[deviceId], 0, &error);
+        clCreateBuffer(miner.context, CL_MEM_WRITE_ONLY, nitems * sizeof(uint32_t), NULL, &error);
     checkError(error);
 
     cl_uint startNonce = 0;
     cl_uint difficultyMask = 0xFFFF0000;
-    clSetKernelArg(kernel, 0, sizeof(cl_mem), &prehashBuffer);
-    clSetKernelArg(kernel, 1, sizeof(cl_mem), &resultBuffer);
-    clSetKernelArg(kernel, 2, sizeof(cl_uint), &startNonce);
-    clSetKernelArg(kernel, 3, sizeof(cl_uint), &difficultyMask);
+    clSetKernelArg(miner.kernel, 0, sizeof(cl_mem), &prehashBuffer);
+    clSetKernelArg(miner.kernel, 1, sizeof(cl_mem), &resultBuffer);
+    clSetKernelArg(miner.kernel, 2, sizeof(cl_uint), &startNonce);
+    clSetKernelArg(miner.kernel, 3, sizeof(cl_uint), &difficultyMask);
 
 #ifdef _WIN32
     LARGE_INTEGER frequency;
@@ -206,14 +289,16 @@ int main(int argc, char *argv[]) {
     gettimeofday(&t1, NULL);
 #endif
 
-    error = clEnqueueNDRangeKernel(queue, kernel, 3, NULL, globalWorkSize, NULL, 0, NULL, NULL);
+    error = clEnqueueNDRangeKernel(miner.commandQueue, miner.kernel, 3, NULL, globalWorkSize, NULL, 0, NULL,
+                                   NULL);
     checkError(error);
 
-    error = clFinish(queue);
+    error = clFinish(miner.commandQueue);
     checkError(error);
 
     uint32_t *result = (uint32_t *) malloc(nitems * sizeof(uint32_t));
-    error = clEnqueueReadBuffer(queue, resultBuffer, CL_TRUE, 0, nitems * 4, result, 0, NULL, NULL);
+    error =
+        clEnqueueReadBuffer(miner.commandQueue, resultBuffer, CL_TRUE, 0, nitems * 4, result, 0, NULL, NULL);
     checkError(error);
 
     double elapsedTime;
@@ -237,15 +322,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    clReleaseCommandQueue(queue);
-
     clReleaseMemObject(prehashBuffer);
     clReleaseMemObject(resultBuffer);
-
-    clReleaseKernel(kernel);
-    clReleaseProgram(program);
-
-    clReleaseContext(context);
+    releaseMiner(&miner);
 
     return 0;
 }
