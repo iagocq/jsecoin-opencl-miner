@@ -24,4 +24,4 @@ SOFTWARE.
 
 #include <jseminer/sha256.cl.h>
 
-char *sha256CLSource = R"(@SHA256_CL_SOURCE@)";
+char *sha256CLSource = R"SHA256_CL_SOURCE(@SHA256_CL_SOURCE@)SHA256_CL_SOURCE";
