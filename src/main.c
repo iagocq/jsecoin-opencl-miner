@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
     int connected = 0;
     int end = 0;
 
-    cl_uint startNonce = 0;
+    cl_ulong startNonce = 0;
     cl_uint difficultyMask = 0xFFFF0000;
     char prehash[64];
     uint32_t hashedPrehash[8];
@@ -172,7 +172,6 @@ int main(int argc, char *argv[]) {
 
     cl_mem prehashBuffer = NULL;
 
-
     end = 1;
 
     if (!socketCreate(sock, AF_INET, SOCK_STREAM))
@@ -192,13 +191,14 @@ int main(int argc, char *argv[]) {
             }
             printf("Accepted Connection\n");
 
-            if ((c = socketRecv(client, netBuf, 72)) < 72) {
-                fprintf(stderr, "Wrong packet size (expected 72, but got %d).\n", c);
+            if ((c = socketRecv(client, netBuf, 76)) < 76) {
+                fprintf(stderr, "Wrong packet size (expected 76, but got %d).\n", c);
                 socketClose(client);
             } else {
                 difficultyMask = ntohl(((uint32_t *) netBuf)[0]);
-                startNonce = ntohl(((uint32_t *) netBuf)[1]);
-                memcpy(prehash, &netBuf[8], 64);
+                startNonce = ((uint64_t *) &netBuf[4])[0];
+                startNonce = ntohll(startNonce);
+                memcpy(prehash, &netBuf[12], 64);
                 connected = 1;
 
                 sha256_init(hashedPrehash);
@@ -214,26 +214,25 @@ int main(int argc, char *argv[]) {
                 clSetKernelArg(miner.kernel, 3, sizeof(cl_uint), &difficultyMask);
             }
         } while (!connected);
-        cl_uint nonce = startNonce;
+        cl_ulong nonce = startNonce;
         do {
             fd_set sockset;
             FD_ZERO(&sockset);
             FD_SET(client->msocket, &sockset);
             int result = select(client->msocket + 1, &sockset, NULL, NULL, &defaultTimeout);
             if (result == 1) {
-                if ((c = socketRecv(client, netBuf, 72)) < 72) {
+                if ((c = socketRecv(client, netBuf, 76)) < 76) {
                     if (c <= 0) {
                         fprintf(stderr, "Closed connection\n");
                         connected = 0;
                     } else {
-                        fprintf(stderr, "Wrong packet size (expected 72, but got %d).\n", c);
+                        fprintf(stderr, "Wrong packet size (expected 76, but got %d).\n", c);
                     }
-                } else if (strcmp(netBuf, "exit") > 0) {
-                    end = 1;
                 } else {
                     difficultyMask = ntohl(((uint32_t *) netBuf)[0]);
-                    startNonce = ntohl(((uint32_t *) netBuf)[1]);
-                    memcpy(prehash, &netBuf[8], 64);
+                    startNonce = ((uint64_t *) &netBuf[4])[0];
+                    startNonce = ntohll(startNonce);
+                    memcpy(prehash, &netBuf[12], 64);
                     nonce = startNonce;
 
                     sha256_init(hashedPrehash);
@@ -249,16 +248,16 @@ int main(int argc, char *argv[]) {
                     clSetKernelArg(miner.kernel, 3, sizeof(cl_uint), &difficultyMask);
                 }
             } else if (result == 0) {
-                clSetKernelArg(miner.kernel, 2, sizeof(cl_uint), &nonce);
-                if (!doMineRound(&miner, globalWorkSize, resultBuffer, (uint8_t *) roundResult)) {
+                clSetKernelArg(miner.kernel, 2, sizeof(cl_ulong), &nonce);
+                if (!doMineRound(&miner, globalWorkSize, resultBuffer, roundResult)) {
                     fprintf(stderr, "Mine error!\n");
                     end = 1;
                 }
                 for (int i = 0; i < nitems; i++) {
                     if (roundResult[i] == 1) {
-                        ((int *) netBuf)[0] = nonce + i;
+                        ((uint64_t *) netBuf)[0] = htonll(nonce + i);
                         socketSend(client, prehash, 64);
-                        socketSend(client, netBuf, 4);
+                        socketSend(client, netBuf, 8);
                     }
                 }
                 nonce += nitems;

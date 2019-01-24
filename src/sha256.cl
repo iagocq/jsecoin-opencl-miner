@@ -42,7 +42,7 @@ __constant const uint k[64] = {
    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
-char ito10(uint num, uchar* buf) {
+char ito10(ulong num, uchar* buf) {
     char r;
     char s;
     char n = 0;
@@ -108,9 +108,9 @@ void sha256round(uchar *data, uint *state) {
     state[7] += h;
 }
 
-__kernel void sha256(__global uint *hashedPrehash, __global uchar *result, uint startNonce, uint difficultyMask) {
+__kernel void sha256(__global uint *hashedPrehash, __global uchar *result, const ulong startNonce, const uint difficultyMask) {
     const int id = get_global_id(0) + get_global_id(1) * get_global_size(0) + get_global_id(2) * get_global_size(0) * get_global_size(1);
-    const uint nonce = id + startNonce;
+    const ulong nonce = id + startNonce;
     uchar padded[64];
     uint state[8];
 
