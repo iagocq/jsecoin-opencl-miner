@@ -22,6 +22,43 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <jseminer/sha256.cl.h>
+#ifndef _JSEMINER_SOCKET_H_
+#define _JSEMINER_SOCKET_H_
 
-char *sha256CLSource = R"(@SHA256_CL_SOURCE@)";
+#ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0501
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#undef UNICODE
+#else // _WIN32
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#define SOCKET_LIB
+#define INVALID_SOCKET -1
+typedef int SOCKET;
+#endif // _WIN32
+
+typedef struct LSOCKET {
+    SOCKET msocket;
+    struct sockaddr_in addr;
+    int type;
+} LSOCKET;
+
+void zerror(char *msg);
+int socketInit(void);
+int socketDeInit(void);
+int socketCreate(LSOCKET *sock, int ver, int type);
+int socketClose(LSOCKET *sock);
+int socketSend(LSOCKET *sock, char *message, int);
+int socketRecv(LSOCKET *sock, char *buf, int len);
+int socketBind(LSOCKET *sock, char *address, unsigned short port);
+int socketListen(LSOCKET *sock, int backlog);
+int socketAccept(LSOCKET *sock, LSOCKET *client);
+int isValidSocket(LSOCKET *sock);
+
+#endif

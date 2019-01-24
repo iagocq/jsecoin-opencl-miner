@@ -33,6 +33,15 @@ SOFTWARE.
 
 #define checkError(error) _checkError(__LINE__, error)
 
+#define fCheckError(error) _fCheckError(__LINE__, error)
+#define _fCheckError(line, error)                                                                            \
+    do {                                                                                                     \
+        if (error != CL_SUCCESS) {                                                                           \
+            fprintf(stderr, "%d: OpenCL call failed with error code %d\n", line, error);                     \
+            return 0;                                                                                        \
+        }                                                                                                    \
+    } while (0)
+
 typedef struct _CL_MINER {
     cl_uint platformCount, deviceCount;
     cl_platform_id *platforms;

@@ -27,11 +27,13 @@ SOFTWARE.
 #include <CL/cl.h>
 #include <getopt.h>
 #include <inttypes.h>
+#include <jseminer/miner.h>
 #include <jseminer/sha256.cl.h>
 #include <jseminer/sha256.h>
-#include <jseminer/miner.h>
+#include <jseminer/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,18 +41,61 @@ SOFTWARE.
 #include <sys/time.h>
 #endif
 
+int doMineRound(CL_MINER *miner, size_t *workSize, cl_mem resultBuffer, uint8_t *result) {
+    cl_uint nitems = workSize[0] * workSize[1] * workSize[2];
+    cl_int error = 0;
+
+    error =
+        clEnqueueNDRangeKernel(miner->commandQueue, miner->kernel, 3, NULL, workSize, NULL, 0, NULL, NULL);
+    fCheckError(error);
+
+    error = clFinish(miner->commandQueue);
+    fCheckError(error);
+
+    error = clEnqueueReadBuffer(miner->commandQueue, resultBuffer, CL_TRUE, 0, nitems, result, 0, NULL, NULL);
+    checkError(error);
+
+    return 1;
+}
+
 int main(int argc, char *argv[]) {
-    int nworkers = 0;
     cl_int error = 0;
     size_t globalWorkSize[3];
     unsigned int deviceIdx, platformIdx;
 
+    LSOCKET *sock = (LSOCKET *) malloc(sizeof(LSOCKET));
+    LSOCKET *client = (LSOCKET *) malloc(sizeof(LSOCKET));
+
+    unsigned short bindPort = 9854;
+    char *bindIP = "127.0.0.1";
+    int c;
+    int connected = 0;
+    int end = 0;
+
+    cl_uint startNonce = 0;
+    cl_uint difficultyMask = 0xFFFF0000;
+    char prehash[64];
+    uint32_t hashedPrehash[8];
+
     CL_MINER miner;
+
+    char netBuf[72];
+
+    struct timeval defaultTimeout = {0, 0};
+
     if (argc < 6) {
-        fprintf(stderr, "Usage: %s [platform ID] [device ID] [<Work Dim X> <Work Dim Y> <Work Dim Z>]\n",
+        fprintf(stderr,
+                "Usage: %s <platform ID> <device ID> <Work Dim 0> <Work Dim 1> <Work Dim 2> [bind port] "
+                "[bind IP]\n",
                 argv[0]);
+        fprintf(stderr, "Running without any of the <required arguments> will show values to use for them "
+                        "and this message\n");
+        fprintf(stderr, "Default bind port: %hu\n", bindPort);
+        fprintf(stderr, "Default bind IP: %s\n", bindIP);
+        fprintf(stderr, "This program will only allow 1 connection at a time\n");
     }
 
+    socketInit();
     initMiner(&miner);
 
     getPlatforms(&miner);
@@ -98,20 +143,18 @@ int main(int argc, char *argv[]) {
     globalWorkSize[0] = (size_t) atoi(argv[3]);
     globalWorkSize[1] = (size_t) atoi(argv[4]);
     globalWorkSize[2] = (size_t) atoi(argv[5]);
-    if (globalWorkSize[0] > miner.maxWorkDimensions[0]) {
-        fprintf(stderr, "Work Dim X is greater than the maximum for the X dimension, setting to %d\n",
-                miner.maxWorkDimensions[0]);
-        globalWorkSize[0] = miner.maxWorkDimensions[0];
+    for (int i = 0; i < 3; i++) {
+        if (globalWorkSize[i] > miner.maxWorkDimensions[i]) {
+            fprintf(stderr, "Work Dim %d is greater than the maximum for dimension %d, setting to %d", i, i);
+            globalWorkSize[i] = miner.maxWorkDimensions[i];
+        }
     }
-    if (globalWorkSize[1] > miner.maxWorkDimensions[1]) {
-        fprintf(stderr, "Work Dim Y is greater than the maximum for the Y dimension, setting to %d\n",
-                miner.maxWorkDimensions[1]);
-        globalWorkSize[1] = miner.maxWorkDimensions[1];
+
+    if (argc > 6) {
+        bindPort = (unsigned short) atoi(argv[6]);
     }
-    if (globalWorkSize[2] > miner.maxWorkDimensions[2]) {
-        fprintf(stderr, "Work Dim Z is greater than the maximum for the Z dimension, setting to %d\n",
-                miner.maxWorkDimensions[2]);
-        globalWorkSize[2] = miner.maxWorkDimensions[2];
+    if (argc > 7) {
+        bindIP = argv[7];
     }
 
     if (!setupMiner(&miner, miner.platforms[0], miner.devices[0], sha256CLSource, "sha256")) {
@@ -119,72 +162,116 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    char prehash[65] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    uint32_t state[8];
-
-    sha256_init(state);
-    sha256_round((uint8_t *) prehash, state);
-
     uint32_t nitems = globalWorkSize[0] * globalWorkSize[1] * globalWorkSize[2];
 
-    cl_mem prehashBuffer =
-        clCreateBuffer(miner.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 64, state, &error);
-    checkError(error);
     cl_mem resultBuffer =
-        clCreateBuffer(miner.context, CL_MEM_WRITE_ONLY, nitems * sizeof(uint32_t), NULL, &error);
-    checkError(error);
+        clCreateBuffer(miner.context, CL_MEM_WRITE_ONLY, nitems * sizeof(cl_uchar), NULL, &error);
 
-    cl_uint startNonce = 0;
-    cl_uint difficultyMask = 0xFFFF0000;
-    clSetKernelArg(miner.kernel, 0, sizeof(cl_mem), &prehashBuffer);
+    uint8_t *roundResult = (uint8_t *) malloc(nitems * sizeof(uint8_t));
     clSetKernelArg(miner.kernel, 1, sizeof(cl_mem), &resultBuffer);
-    clSetKernelArg(miner.kernel, 2, sizeof(cl_uint), &startNonce);
-    clSetKernelArg(miner.kernel, 3, sizeof(cl_uint), &difficultyMask);
 
-#ifdef _WIN32
-    LARGE_INTEGER frequency;
-    LARGE_INTEGER t1, t2;
-    QueryPerformanceFrequency(&frequency);
-    QueryPerformanceCounter(&t1);
-#else
-    struct timeval t1, t2;
-    gettimeofday(&t1, NULL);
-#endif
+    cl_mem prehashBuffer = NULL;
 
-    error = clEnqueueNDRangeKernel(miner.commandQueue, miner.kernel, 3, NULL, globalWorkSize, NULL, 0, NULL,
-                                   NULL);
-    checkError(error);
 
-    error = clFinish(miner.commandQueue);
-    checkError(error);
+    end = 1;
 
-    uint32_t *result = (uint32_t *) malloc(nitems * sizeof(uint32_t));
-    error =
-        clEnqueueReadBuffer(miner.commandQueue, resultBuffer, CL_TRUE, 0, nitems * 4, result, 0, NULL, NULL);
-    checkError(error);
+    if (!socketCreate(sock, AF_INET, SOCK_STREAM))
+        zerror("socketCreate Error");
+    else if (socketBind(sock, (char *) bindIP, bindPort) < 0)
+        zerror("socketBind Error");
+    else if (socketListen(sock, 0))
+        zerror("socketListen Error");
+    else
+        end = 0;
 
-    double elapsedTime;
-#ifdef _WIN32
-    QueryPerformanceCounter(&t2);
-    elapsedTime = (float) (t2.QuadPart - t1.QuadPart) / (float) frequency.QuadPart;
-#else
-    gettimeofday(&t2, NULL);
-    elapsedTime = (t2.tv_sec - t1.tv_sec) * 1000.0;
-    elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;
-    elapsedTime /= 1000;
-#endif
+    while (!end) {
+        do {
+            printf("Waiting for connection...\n");
+            if (!socketAccept(sock, client)) {
+                zerror("Accept Error");
+            }
+            printf("Accepted Connection\n");
 
-    printf("Took %.3fs\n", elapsedTime);
-    printf("%d Hashes\n", nitems);
-    printf("%.3f H/s\n", (double) nitems / elapsedTime);
+            if ((c = socketRecv(client, netBuf, 72)) < 72) {
+                fprintf(stderr, "Wrong packet size (expected 72, but got %d).\n", c);
+                socketClose(client);
+            } else {
+                difficultyMask = ntohl(((uint32_t *) netBuf)[0]);
+                startNonce = ntohl(((uint32_t *) netBuf)[1]);
+                memcpy(prehash, &netBuf[8], 64);
+                connected = 1;
 
-    for (int i = 0; i < nitems; i++) {
-        if (result[i] == 1) {
-            printf("%d\n", i);
-        }
+                sha256_init(hashedPrehash);
+                sha256_round((uint8_t *) prehash, hashedPrehash);
+
+                if (prehashBuffer != NULL)
+                    clReleaseMemObject(prehashBuffer);
+
+                prehashBuffer = clCreateBuffer(miner.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 64,
+                                               hashedPrehash, &error);
+
+                clSetKernelArg(miner.kernel, 0, sizeof(cl_mem), &prehashBuffer);
+                clSetKernelArg(miner.kernel, 3, sizeof(cl_uint), &difficultyMask);
+            }
+        } while (!connected);
+        cl_uint nonce = startNonce;
+        do {
+            fd_set sockset;
+            FD_ZERO(&sockset);
+            FD_SET(client->msocket, &sockset);
+            int result = select(client->msocket + 1, &sockset, NULL, NULL, &defaultTimeout);
+            if (result == 1) {
+                if ((c = socketRecv(client, netBuf, 72)) < 72) {
+                    if (c <= 0) {
+                        fprintf(stderr, "Closed connection\n");
+                        connected = 0;
+                    } else {
+                        fprintf(stderr, "Wrong packet size (expected 72, but got %d).\n", c);
+                    }
+                } else if (strcmp(netBuf, "exit") > 0) {
+                    end = 1;
+                } else {
+                    difficultyMask = ntohl(((uint32_t *) netBuf)[0]);
+                    startNonce = ntohl(((uint32_t *) netBuf)[1]);
+                    memcpy(prehash, &netBuf[8], 64);
+                    nonce = startNonce;
+
+                    sha256_init(hashedPrehash);
+                    sha256_round((uint8_t *) prehash, hashedPrehash);
+
+                    if (prehashBuffer != NULL)
+                        clReleaseMemObject(prehashBuffer);
+
+                    prehashBuffer = clCreateBuffer(miner.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 64,
+                                                   hashedPrehash, &error);
+
+                    clSetKernelArg(miner.kernel, 0, sizeof(cl_mem), &prehashBuffer);
+                    clSetKernelArg(miner.kernel, 3, sizeof(cl_uint), &difficultyMask);
+                }
+            } else if (result == 0) {
+                clSetKernelArg(miner.kernel, 2, sizeof(cl_uint), &nonce);
+                if (!doMineRound(&miner, globalWorkSize, resultBuffer, (uint8_t *) roundResult)) {
+                    fprintf(stderr, "Mine error!\n");
+                    end = 1;
+                }
+                for (int i = 0; i < nitems; i++) {
+                    if (roundResult[i] == 1) {
+                        ((int *) netBuf)[0] = nonce + i;
+                        socketSend(client, prehash, 64);
+                        socketSend(client, netBuf, 4);
+                    }
+                }
+                nonce += nitems;
+            } else {
+                printf("Select error!\n");
+                socketClose(client);
+                connected = 0;
+            }
+        } while (connected && !end);
     }
 
-    clReleaseMemObject(prehashBuffer);
+    socketDeInit();
+
     clReleaseMemObject(resultBuffer);
     releaseMiner(&miner);
 

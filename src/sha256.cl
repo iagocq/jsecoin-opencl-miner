@@ -108,7 +108,7 @@ void sha256round(uchar *data, uint *state) {
     state[7] += h;
 }
 
-__kernel void sha256(__global uint *hashedPrehash, __global uint *result, uint startNonce, uint difficultyMask) {
+__kernel void sha256(__global uint *hashedPrehash, __global uchar *result, uint startNonce, uint difficultyMask) {
     const int id = get_global_id(0) + get_global_id(1) * get_global_size(0) + get_global_id(2) * get_global_size(0) * get_global_size(1);
     const uint nonce = id + startNonce;
     uchar padded[64];

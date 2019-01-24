@@ -24,15 +24,6 @@ SOFTWARE.
 
 #include <jseminer/miner.h>
 
-#define fCheckError(error) _fCheckError(__LINE__, error)
-#define _fCheckError(line, error)                                                                            \
-    do {                                                                                                     \
-        if (error != CL_SUCCESS) {                                                                           \
-            fprintf(stderr, "%d: OpenCL call failed with error code %d\n", line, error);                     \
-            return 0;                                                                                        \
-        }                                                                                                    \
-    } while (0)
-
 void _checkError(int line, cl_int error) {
     if (error != CL_SUCCESS) {
         fprintf(stderr, "%d: OpenCL call failed with error code %d\n", line, error);
